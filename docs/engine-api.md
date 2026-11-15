@@ -43,6 +43,21 @@ HTTP 上走 `POST /<action>`，WebSocket 上直接发 `{"action":"...","params":
 | `can_send_image` / `can_send_record` | — |
 | `get_cookies` | — |
 
+### 私聊的 `user_id` 可以填 QQ 号
+
+QQ 内核内部用 uid（`u_xxxx`）寻址私聊，而调用方手里只有 QQ 号。引擎自己维护一张
+`uin → uid` 表（`js/uin-uid.json`，gitignore 掉了）：每收到一条消息就把
+`senderUin/senderUid`、`peerUin/peerUid` 记下来，所以**任何一个给机器人发过消息的人**
+都能直接用 QQ 号发。表里没有时会向内核问一次（`nodeIKernelGroupService/getUidByUins`，
+只认同群的人）；还不行就返回
+
+```json
+{"status":"failed","retcode":100,"msg":"cannot resolve 123456 to a uid; send any message to/from that QQ number once so the mapping is learned"}
+```
+
+而不是拿 QQ 号当 uid 硬发（那样内核不认、只会超时）。想让某个号立刻可用，让他在电脑上
+给机器人发一条消息即可。
+
 ### 消息段
 
 `message` 接受三种写法，都等价：

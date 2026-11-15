@@ -211,6 +211,7 @@ Read this before you plan around it.
 - Image sends often produce **no RPC reply** at all (upload is asynchronous). The engine treats a timeout as success, so you may not receive a `message_id`.
 - **Not implemented:** file, voice/record, video, and most non-message actions (`set_group_*`, group admin, friend requests, reactions). This is a useful subset of OneBot v11, not the whole spec.
 - Merged chat records: **reading** is implemented (`get_forward_msg`), but it has never been verified against a real forwarded record - the test account had no sample to try.
+- Private messages are addressed by `uid`, not by QQ number. The engine keeps a `uin -> uid` map (`js/uin-uid.json`) learned from the messages it receives, so a QQ number works **once that person has sent the bot a message**. Until then the call returns `retcode 100` with `cannot resolve ... to a uid` rather than sending to a nonexistent peer.
 
 **Things that will break it.**
 - Don't touch `ipcMain._events`. Replacing the client's own handler destroys its reply channel and every send starts timing out.

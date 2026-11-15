@@ -24,6 +24,7 @@ js/ws_token.txt
 js/boot.log
 js/engine.log
 js/reload.flag
+js/uin-uid.json
 media-tmp/
 
 # scratch

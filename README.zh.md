@@ -198,6 +198,7 @@ function Module._load(request, parent, isMain)
 - 发图**经常根本收不到 RPC 回包**（上传是异步的）。引擎把超时当成功处理，所以你可能拿不到 `message_id`。
 - **没实现**：文件、语音、视频，以及大部分非消息类动作（`set_group_*`、群管理、好友请求、表态）。这是 OneBot v11 的一个有用子集，不是完整实现。
 - 合并转发：**读取**做了（`get_forward_msg`），但从没拿真实的转发消息验过 —— 测试号里没有样本。
+- 私聊在 QQ 内部是按 `uid`（`u_xxx`）寻址的，不是 QQ 号。引擎自己维护一张 `uin → uid` 表（`js/uin-uid.json`，从收到的消息里学），所以**对方给机器人发过一条消息之后**，直接用 QQ 号就能发。表里没有时返回 `retcode 100` + `cannot resolve ... to a uid`，不会拿 QQ 号当 uid 硬发。
 
 **这些动作会把它弄坏。**
 - 别碰 `ipcMain._events`。把客户端自己的 handler 换掉，它的回包通道就死了，之后所有发送都开始超时。

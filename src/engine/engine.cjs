@@ -107,6 +107,12 @@ function textOf(msg){
 }
 
 function normMsg(m){
+  // Every message carries both ids for both ends; harvest them so a later
+  // "send to 3931221806" can be resolved without asking the kernel.
+  try {
+    rememberUin(m.senderUin, m.senderUid);
+    rememberUin(m.peerUin, m.peerUid);
+  } catch(e) {}
   return {
     msgId: String(m.msgId || ''), msgSeq: String(m.msgSeq || ''),
     chatType: m.chatType, msgType: m.msgType, subMsgType: m.subMsgType, sendType: m.sendType,
@@ -647,17 +653,65 @@ function q(url, k){
   return m ? decodeURIComponent(m[1]) : null;
 }
 
+// uin -> uid. QQ addresses private chats by uid (u_xxx); callers usually only know
+// the QQ number. Sources, in order: what we learned earlier (persisted next to the
+// engine), the profile cache, every message we have seen (senderUin/senderUid,
+// peerUin/peerUid), and finally the kernel itself.
+const UINMAP_FILE = path.join(PKG, 'uin-uid.json');
+function uinIndex(){
+  var ix = global.__wbUinUid;
+  if (ix) return ix;
+  ix = global.__wbUinUid = {};
+  try {
+    var j = JSON.parse(fs.readFileSync(UINMAP_FILE, 'utf8'));
+    Object.keys(j || {}).forEach(function(k){ if (typeof j[k] === 'string' && j[k].indexOf('u_') === 0) ix[k] = j[k]; });
+  } catch(e) {}
+  return ix;
+}
+var uinSaveTimer = null;
+function rememberUin(uin, uid){
+  var u = String(uin || ''), id = String(uid || '');
+  if (!u || !id || id.indexOf('u_') !== 0) return;
+  var ix = uinIndex();
+  if (ix[u] === id) return;
+  ix[u] = id;
+  // coalesce writes; the map is small but this runs on every message
+  if (uinSaveTimer) return;
+  uinSaveTimer = setTimeout(function(){
+    uinSaveTimer = null;
+    try { fs.writeFileSync(UINMAP_FILE, JSON.stringify(uinIndex()), 'utf8'); } catch(e) {}
+  }, 2000);
+  if (uinSaveTimer.unref) uinSaveTimer.unref();
+}
 function uidOf(x){
   var v = String(x || '');
   if (v.indexOf('u_') === 0) return v;
+  var ix = uinIndex();
+  if (ix[v]) return ix[v];
   var pr = global.__wbProfiles || {};
   var ks = Object.keys(pr);
   for (var i = 0; i < ks.length; i++) {
     var pf = pr[ks[i]] || {};
     var uin = String(pf.uin || (pf.coreInfo && pf.coreInfo.uin) || '');
-    if (uin && uin === v) return ks[i];
+    if (uin && uin === v) { rememberUin(v, ks[i]); return ks[i]; }
   }
   return v;
+}
+// Ask the kernel. getUidByUins is the group service's batch form; it only knows
+// people we share a group with, so this is a best-effort last resort.
+async function uidOfAsync(x){
+  var v = String(x || '');
+  if (v.indexOf('u_') === 0) return v;
+  var direct = uidOf(v);
+  if (direct.indexOf('u_') === 0) return direct;
+  try {
+    var r = await rpc('nodeIKernelGroupService/getUidByUins', [[v]], 'ntApi', 6000);
+    var res = (r && r.data && (r.data.result || r.data)) || {};
+    var uids = res.uids || res;
+    var got = uids && (uids[v] || (Array.isArray(uids) ? uids[0] : ''));
+    if (typeof got === 'string' && got.indexOf('u_') === 0) { rememberUin(v, got); return got; }
+  } catch(e) {}
+  return '';
 }
 
 var groupsAt = 0;
@@ -753,9 +807,10 @@ var server = http.createServer(async function(req, res){
       var txt = flatMessage(srcPriv);
       var privRich = needsElems(srcPriv);
       if (!txt && !privRich) return sendJson(res, 200, { status: 'failed', retcode: 100, msg: 'empty message' });
-      var pu = uidOf(target);
+      var pu = await uidOfAsync(target);
       if (String(pu).indexOf('u_') !== 0) {
-        await rpc('nodeIKernelProfileService/getUserSimpleInfo', [{ uids: [] }]);
+        return sendJson(res, 200, { status: 'failed', retcode: 100,
+          msg: 'cannot resolve ' + target + ' to a uid; send any message to/from that QQ number once so the mapping is learned' });
       }
       var rr;
       if (privRich) {
@@ -960,6 +1015,15 @@ var server = http.createServer(async function(req, res){
       var srcMsg = d.message !== undefined ? d.message : d.text;
       var text = flatMessage(srcMsg);
       var chatType = type === 'private' ? 1 : 2;
+      if (chatType === 1) {
+        // private chats are addressed by uid; callers give us a QQ number
+        var pu2 = await uidOfAsync(target);
+        if (String(pu2).indexOf('u_') !== 0) {
+          return sendJson(res, 200, { status: 'failed', retcode: 100,
+            msg: 'cannot resolve ' + target + ' to a uid; send any message to/from that QQ number once so the mapping is learned' });
+        }
+        target = pu2;
+      }
       var rich = needsElems(srcMsg);
       var hasPic = Array.isArray(srcMsg) && srcMsg.some(function(s){ return s && s.type === 'image'; });
       if (!text && !rich) return sendJson(res, 200, { status: 'failed', retcode: 100, msg: 'empty message' });
@@ -1128,6 +1192,14 @@ async function handleAction(action, p) {
     var srcMsg = p.message !== undefined ? p.message : p.text;
     var text = flatMessage(srcMsg);
     var chatType = type === 'private' ? 1 : 2;
+    if (chatType === 1) {
+      var pu3 = await uidOfAsync(target);
+      if (String(pu3).indexOf('u_') !== 0) {
+        return { retcode: 100, data: null,
+          wording: 'cannot resolve ' + target + ' to a uid; send any message to/from that QQ number once so the mapping is learned' };
+      }
+      target = pu3;
+    }
     var rich = needsElems(srcMsg);
     var hasPic = Array.isArray(srcMsg) && srcMsg.some(function (s) { return s && s.type === 'image'; });
     if (!text && !rich) return { retcode: 100, data: null, wording: 'empty message' };
