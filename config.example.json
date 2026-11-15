@@ -1,0 +1,19 @@
+{
+  "port": 3902,
+  "qq_exe": "C:\\Program Files\\Tencent\\QQNT\\QQ.exe",
+  "qq_cwd": "C:\\Program Files\\Tencent\\QQNT",
+  "self_uin": 0,
+  "data_dir": "",
+  "ws_token": "",
+
+  "_comment": [
+    "port     : the engine's HTTP + WebSocket port (loopback only)",
+    "qq_exe   : full path to QQ.exe -- install.ps1 fills this in for you",
+    "qq_cwd   : working directory to launch QQ from (usually qq_exe's folder)",
+    "self_uin : your QQ number; 0 means auto-detect from data_dir",
+    "data_dir : account data directory, e.g. <QQ dir>\\Tencent Files\\<uin>",
+    "           the engine needs it to find image caches and to serve /media",
+    "ws_token : leave empty to disable WS auth, or put a secret here",
+    "           install.ps1 generates one per machine into js/ws_token.txt"
+  ]
+}

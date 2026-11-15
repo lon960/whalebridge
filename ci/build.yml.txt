@@ -1,0 +1,87 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - '.github/workflows/build.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  injector:
+    name: build injector (windows x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile payload.dll
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cl /nologo /LD /O1 /GS- /wd4819 /Fo:build\ /Fd:build\ ^
+             /Fe:bin\payload.dll src\injector\payload.c src\injector\crt-stub.c ^
+             /link /NODEFAULTLIB /ENTRY:DllMain /SUBSYSTEM:WINDOWS kernel32.lib
+
+      - name: Compile wbinj.exe
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cl /nologo /O1 /GS- /wd4819 /Fo:build\ /Fd:build\ ^
+             /Fe:bin\wbinj.exe src\injector\wbinj.c src\injector\crt-stub.c ^
+             /link /NODEFAULTLIB /ENTRY:wbinj_entry /SUBSYSTEM:CONSOLE kernel32.lib
+
+      - name: Verify binaries exist
+        shell: pwsh
+        run: |
+          foreach ($f in 'bin\payload.dll', 'bin\wbinj.exe') {
+            if (-not (Test-Path $f)) { throw "missing $f" }
+            Get-Item $f | Select-Object Name, Length
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: injector-x64
+          path: bin\*.dll
+          # wbinj.exe is a helper, ship it too
+      - uses: actions/upload-artifact@v4
+        with:
+          name: injector-tools-x64
+          path: bin\*.exe
+
+  engine:
+    name: check engine syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: node --check
+        run: |
+          node --check src/engine/engine.cjs
+          node --check src/engine/wb-template.js
+      - name: no machine-specific strings
+        run: |
+          set -e
+          if grep -rnE 'D:\\\\QQ|SnowLuma\\\\node' src scripts; then
+            echo "::error::hardcoded machine path found"; exit 1
+          fi
+
+  powershell:
+    name: parse powershell
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse scripts
+        shell: pwsh
+        run: |
+          $bad = 0
+          Get-ChildItem scripts\*.ps1 | ForEach-Object {
+            $errs = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errs)
+            Write-Host "$($_.Name): $($errs.Count) parse errors"
+            if ($errs.Count -gt 0) { $errs | ForEach-Object { Write-Host "  $($_.Message)" }; $bad++ }
+          }
+          if ($bad -gt 0) { exit 1 }
