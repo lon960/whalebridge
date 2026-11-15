@@ -95,19 +95,27 @@ QQ 内核内部用 uid（`u_xxxx`）寻址私聊，而调用方手里只有 QQ �
 { "type": "forward", "data": { "id": "<resId>", "summary": "[聊天记录]" } }
 ```
 
-内层消息要用 `get_forward_msg` 再取一次：
+内层消息**取不到** —— 这是已知限制，不是参数没调对：
 
 ```json
 POST /get_forward_msg
 {"id": "<resId>", "group_id": "1132178767"}
 
--> {"status":"ok","retcode":0,"data":{"messages":[ <OneBot 消息对象> ]}}
+-> {"status":"failed","retcode":1404,
+    "msg":"forward message not readable through ntApi (no SSO callback channel); this is a known limitation"}
 ```
 
-底层是 `nodeIKernelMsgService/getMultiMsg`，它断言需要 3 个参数
-（`needs 3 arguments`），但槽位顺序没有文档；引擎会依次试
-`[peer, id, id]` / `[peer, '0', id]` / `[id, peer, 0]`，
-哪个返回 `msgList` 就用哪个。都取不到时返回 `retcode 1404`。
+原因（都从 `wrapper.node` 的符号与断言读出来）：
+
+- 底层是 `nodeIKernelMsgService/getMultiMsg`，断言 `needs 3 arguments`，但它的 C++ 签名里带一个回调对象，
+  从 JS 递不进去；三种槽位顺序（`[peer, id, id]` / `[peer, '0', id]` / `[id, peer, 0]`）都试过，全部回 `{}`。
+- 真正的回包通道是 `NodeIQQNTWrapperSession::onSendSSOReply`（断言 `needs 5 arguments`），挂在 session 对象上；
+  而 session 在注入之前就已经被 QQ 持有，`getNTWrapperSession(key)` 任何 key 都是 `undefined`。
+- 发送侧同样走不通：`buildMultiForwardMsg` 要 C++ 结构体（`BuildMultiMsgReqInfo`），
+  `multiForwardMsg`（3 参）与 `forwardMsg`（4 参）都静默返回 `{}`、不投递。
+
+能做到这一点的项目（锚、SnowLuma）都不走 ntApi：前者 `process.dlopen` 直接拿 wrapper 的 napi 对象，
+后者有自己的 native 管道（`client.send(cmd, body, { wantReply: true })`）。
 
 ## 直通 / 调试
 

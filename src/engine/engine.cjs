@@ -979,7 +979,9 @@ var server = http.createServer(async function(req, res){
         var ml3 = rj2.msgList || (rj2.result && rj2.result.msgList) || [];
         if (ml3.length) return sendJson(res, 200, { status: 'ok', retcode: 0, data: { messages: ml3.map(function (m) { return toOneBot(m); }) } });
       }
-      return sendJson(res, 200, { status: 'failed', retcode: 1404, msg: 'forward message not found' });
+      // ntApi cannot read merged chat records: getMultiMsg needs a callback we cannot pass,
+      // and the SSO reply channel (onSendSSOReply) lives on a session object we cannot reach.
+      return sendJson(res, 200, { status: 'failed', retcode: 1404, msg: 'forward message not readable through ntApi (no SSO callback channel); this is a known limitation' });
     }
     if (url === '/get_group_list') {
       var gs = await ensureGroups();
@@ -1241,7 +1243,7 @@ async function handleAction(action, p) {
         return { retcode: 0, data: { messages: ml2.map(function (m) { return toOneBot(m); }) } };
       }
     }
-    return { retcode: 1404, data: null, wording: 'forward message not found' };
+    return { retcode: 1404, data: null, wording: 'forward message not readable through ntApi (no SSO callback channel)' };
   }
   if (action === 'get_group_info') {
     var g6 = String(p.group_id || '');

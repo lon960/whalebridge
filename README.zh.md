@@ -59,7 +59,7 @@ WhaleBridge：你的程序 --（注入到 QQ.exe 里）--> QQ 自己发
 | Linux / macOS | **不支持** |
 
 能力：文本 ✅ · 图片 ✅（有 MD5 缓存前提）· @ ✅ · 表情 ✅ ·
-合并转发 ✅（`get_forward_msg`）· 群/成员列表 ✅ · 历史消息 ✅ ·
+合并转发 ⚠️（消息段能解析，取内容不行 — 见「限制」）· 群/成员列表 ✅ · 历史消息 ✅ ·
 媒体代理 ✅ · 文件/语音发送 ❌。
 
 `message` 支持三种写法：纯字符串、CQ 码字符串、OneBot v11 消息段数组
@@ -197,7 +197,10 @@ function Module._load(request, parent, isMain)
   `<数据目录>\nt_qq\nt_data\Pic\<年-月>\Ori\<MD5大写>.<扩展名>`。内核会重算哈希，名字不对就 `fileErrCode 2006003`。不能直接甩一个任意本地路径。
 - 发图**经常根本收不到 RPC 回包**（上传是异步的）。引擎把超时当成功处理，所以你可能拿不到 `message_id`。
 - **没实现**：文件、语音、视频，以及大部分非消息类动作（`set_group_*`、群管理、好友请求、表态）。这是 OneBot v11 的一个有用子集，不是完整实现。
-- 合并转发：**读取**做了（`get_forward_msg`），但从没拿真实的转发消息验过 —— 测试号里没有样本。
+- 合并转发：`forward` **消息段**能解析出来，带 `{id, summary}`；但用 `get_forward_msg` 取内层消息**取不到**。
+  它要走 `nodeIKernelMsgService/getMultiMsg`，C++ 签名里带一个回调对象，JS 递不进去；回包通道
+  `NodeIQQNTWrapperSession::onSendSSOReply` 又挂在拿不到的 session 对象上。发送同样做不到：`buildMultiForwardMsg`
+  要 C++ 结构体，`multiForwardMsg` 静默不投递。能做的项目（锚、SnowLuma）都绕开了 ntApi。
 - 私聊在 QQ 内部是按 `uid`（`u_xxx`）寻址的，不是 QQ 号。引擎自己维护一张 `uin → uid` 表（`js/uin-uid.json`，从收到的消息里学），所以**对方给机器人发过一条消息之后**，直接用 QQ 号就能发。表里没有时返回 `retcode 100` + `cannot resolve ... to a uid`，不会拿 QQ 号当 uid 硬发。
 
 **这些动作会把它弄坏。**
