@@ -827,7 +827,7 @@ var server = http.createServer(async function(req, res){
         data: { message_id: String(Date.now()), peerUid: pu }, result: (rr || {}).data || rr, timeout: !!(rr && rr.timeout) });
     }
     if (url === '/get_group_member_list') {
-      var gid = String(d.group_id || d.group || '');
+      var gid = String(d.group_id || d.group || q(req.url, 'group_id') || '');
       var r1 = await rpc('nodeIKernelGroupService/getAllMemberList', [{ groupCode: gid, forceUpdate: false }]);
       var ids = (((r1 || {}).data || {}).result || {}).ids || [];
       var uids = ids.map(function(x){ return x && (x.uid || x); }).filter(Boolean);
@@ -997,16 +997,6 @@ var server = http.createServer(async function(req, res){
         });
       })(list);
       return sendJson(res, 200, { status: 'ok', retcode: 0, data: out });
-    }
-    if (url === '/get_group_member_list') {
-      var gid = d.group_id || q(req.url, 'group_id');
-      var r1 = await rpc('nodeIKernelGroupService/getGroupMemberList', [{ groupCode: String(gid), forceUpdate: false }], 'ntApi', 10000);
-      var mi = (r1.data && (r1.data.memberInfo || r1.data.members)) || [];
-      var mem = mi.map(function(m){
-        return { group_id: Number(gid), user_id: Number(m.uin || 0), nickname: m.nick || m.cardName || '',
-          card: m.cardName || '', role: m.memberRole === 4 ? 'owner' : (m.memberRole === 3 ? 'admin' : 'member') };
-      });
-      return sendJson(res, 200, { status: 'ok', retcode: 0, data: mem });
     }
     if (url === '/send_group_msg' || url === '/send_private_msg' || url === '/send_msg') {
       var type = d.message_type || (url === '/send_group_msg' ? 'group' : (url === '/send_private_msg' ? 'private' : ''));
