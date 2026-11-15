@@ -186,6 +186,44 @@ Full route list is in [docs/engine-api.md](docs/engine-api.md).
 3. **Hot-reload is only for stateless HTTP handlers.** Anything touching the send wrapper,
    the tap, or the push subscription needs a full QQ restart.
 
+## Limitations
+
+Read this before you plan around it.
+
+**Tied to the QQ build.**
+- Verified on QQ **9.9.37-54395** only. Other 9.9.x builds *should* work through the marker anchor, but none has been tested.
+- The injector needs the Node standard library to still be embedded as **plain JS text** inside `QQNT.dll`. If a build ships a precompiled snapshot, or renames `wrapModuleLoad`, the log says `NO ANCHOR` and the only fix is re-porting (see [docs/porting.md](docs/porting.md)).
+- A QQ update can break this overnight. Pin the version, or accept the maintenance.
+
+**Platform.**
+- Windows x64 only. Windows 11 verified; Windows 10 1809+ expected (Node 24 baseline).
+- Win 7/8.1, 32-bit, Server Core, Linux, macOS: **not supported**. ARM64: untested.
+
+**Startup and lifecycle.**
+- QQ must be started **suspended -> injected -> resumed**. Launch it by hand and you get a normal client with no engine, and `/health` will never answer.
+- Writing `C:\wb.js` needs **administrator** rights. `install.ps1` checks this up front.
+- The engine lives inside that one QQ process. Restart QQ, log out, or let it crash, and the engine is gone - run `start.ps1` again.
+- One QQ account per process. Multiple accounts means multiple clients (untested).
+
+**Sending.**
+- **Images require the file to already be in QQ's own cache**, named by its real MD5:
+  `<data dir>\nt_qq\nt_data\Pic\<yyyy-mm>\Ori\<MD5-UPPER>.<ext>`. The kernel recomputes the hash; a misnamed file fails with `fileErrCode 2006003`. You cannot hand it an arbitrary local path.
+- Image sends often produce **no RPC reply** at all (upload is asynchronous). The engine treats a timeout as success, so you may not receive a `message_id`.
+- **Not implemented:** file, voice/record, video, and most non-message actions (`set_group_*`, group admin, friend requests, reactions). This is a useful subset of OneBot v11, not the whole spec.
+- Merged chat records: **reading** is implemented (`get_forward_msg`), but it has never been verified against a real forwarded record - the test account had no sample to try.
+
+**Things that will break it.**
+- Don't touch `ipcMain._events`. Replacing the client's own handler destroys its reply channel and every send starts timing out.
+- Don't reload the renderer at runtime. The client never re-subscribes to message push, and inbound messages stop silently.
+- Hot-reload is safe only for stateless HTTP routes. Anything on the send/receive path needs a full QQ restart.
+
+**Scope.**
+- This repo is the transport only: injector + engine. Persona, memory, tools and the console live in [qq-bridge](https://github.com/Derpyu520/qq-bridge), a separate project.
+- `:3902` and `:3100` bind to loopback. **The engine's power equals the QQ account's power** - whitelist who can reach it.
+
+**Legal.**
+- Injection is not something Tencent's ToS explicitly permits. No ban was observed during testing; that is not a guarantee.
+
 ## Security
 
 - Modifies **memory only**; the on-disk client is bit-identical.
