@@ -96,7 +96,7 @@ Copy-Item (Join-Path $Repo 'src\engine\engine.cjs')     (Join-Path $InstallDir '
 Copy-Item (Join-Path $Repo 'src\engine\wb-template.js') (Join-Path $InstallDir 'js\wb-template.js') -Force
 Copy-Item $dll (Join-Path $InstallDir 'bin\payload.dll') -Force
 Copy-Item $inj (Join-Path $InstallDir 'bin\wbinj.exe')   -Force
-foreach ($s in @('start.ps1', 'supervise.ps1', 'uninstall.ps1', 'patch-config.mjs')) {
+foreach ($s in @('start.ps1', 'supervise.ps1', 'uninstall.ps1', 'patch-config.mjs', 'sanitize-config.mjs')) {
   $src = Join-Path $Repo "scripts\$s"
   if (Test-Path $src) { Copy-Item $src (Join-Path $InstallDir "scripts\$s") -Force }
 }
@@ -166,8 +166,21 @@ if (-not $SkipBridge) {
   if (-not (Test-Path $node)) { $node = (Get-Command node -ErrorAction SilentlyContinue).Source }
 
   if (Test-Path $bcfg) {
+    # Sanitize first: a config shipped from someone else's machine carries their
+    # ownerQQ / allow-lists / DSH port / voice paths, and every one of those fails
+    # silently (bot ignores people, DSH never connects, ffmpeg not found).
+    $san = Join-Path $InstallDir 'scripts\sanitize-config.mjs'
+    if ($node -and (Test-Path $san)) {
+      & $node $san $bcfg --owner $(if ($SelfUin) { $SelfUin } else { '' }) | Write-Host
+    }
+
     $bt = [System.IO.File]::ReadAllText($bcfg)
-    $bt = [regex]::Replace($bt, '"accessToken"\s*:\s*"[^"]*"', '"accessToken": "' + $tok + '"')
+    # One token, three places. The engine reads js\ws_token.txt; the bridge sends
+    # qq.wsToken on the WebSocket upgrade. If these disagree the engine answers 401
+    # and the bridge retries forever, which looks exactly like "the bot is dead".
+    $bt = [regex]::Replace($bt, '("wsToken"\s*:\s*")[^"]*(")', '${1}' + $tok + '${2}')
+    $bt = [regex]::Replace($bt, '("httpToken"\s*:\s*")[^"]*(")', '${1}' + $tok + '${2}')
+    $bt = [regex]::Replace($bt, '("accessToken"\s*:\s*")[^"]*(")', '${1}' + $tok + '${2}')
     $bt = [regex]::Replace($bt, '"homeDir"\s*:\s*"[^"]*"', '"homeDir": ""')
     [System.IO.File]::WriteAllText($bcfg, $bt, $enc)
 

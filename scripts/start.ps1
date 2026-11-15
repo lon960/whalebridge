@@ -1,9 +1,15 @@
 ﻿<#
-  start.ps1 - stop QQ, relaunch it suspended + injected, then start the bridge
+  start.ps1 - bring the engine up.
+
+  Idempotent: if the engine is already answering on its port, nothing is touched -
+  QQ keeps running, the session keeps working. QQ is only restarted when the engine
+  is not there, because injection has to land before QQ's module loader compiles
+  the builtin sources.
 #>
 param(
   [string]$Root = "",
   [switch]$NoKill,
+  [switch]$Force,
   [int]$WaitSeconds = 90
 )
 $ErrorActionPreference = 'Stop'
@@ -13,18 +19,48 @@ if (-not (Test-Path $cfgPath)) { throw "not installed: missing $cfgPath, run ins
 $cfg = Get-Content $cfgPath -Raw -Encoding UTF8 | ConvertFrom-Json
 
 $exe = $cfg.qq_exe; $cwd = $cfg.qq_cwd
-if (-not (Test-Path $exe)) { throw "QQ.exe not found: $exe" }
 $port = if ($cfg.port) { [int]$cfg.port } else { 3902 }
 $dll = Join-Path $Root 'bin\payload.dll'
 $inj = Join-Path $Root 'bin\wbinj.exe'
 $node = Join-Path $Root 'runtime\node.exe'
 if (-not (Test-Path $node)) { $node = (Get-Command node -ErrorAction SilentlyContinue).Source }
-foreach ($f in @($dll,$inj,'C:\wb.js')) { if (-not (Test-Path $f)) { throw "missing $f (run install first)" } }
+
+function Test-Engine {
+  param([int]$P)
+  try { $r = Invoke-RestMethod -Uri "http://127.0.0.1:$P/health" -TimeoutSec 2; return [bool]$r.ok } catch { return $false }
+}
+
+function Start-Bridge {
+  $bridgeDir = Join-Path $Root 'bridge'
+  if (-not (Test-Path (Join-Path $bridgeDir 'src\bridge.js'))) { Write-Host "bridge not installed, skipping"; return }
+  $br = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match 'bridge\.js' })
+  if ($br.Count -eq 0) {
+    Start-Process -FilePath $node -ArgumentList 'src/bridge.js' -WorkingDirectory $bridgeDir -WindowStyle Hidden
+    Write-Host "bridge started"
+  } else {
+    Write-Host "bridge already running (pid $($br[0].ProcessId))"
+  }
+}
+
+# ----- 1. engine already up: touch nothing -----
+if (-not $Force -and (Test-Engine -P $port)) {
+  Write-Host "engine already running on 127.0.0.1:$port, leaving QQ alone" -ForegroundColor Green
+  Start-Bridge
+  Write-Host ""
+  Write-Host "ready: engine http://127.0.0.1:$port | console http://127.0.0.1:3100/" -ForegroundColor Green
+  return
+}
+
+# ----- 2. need a (re)inject -----
+if (-not (Test-Path $exe)) { throw "QQ.exe not found: $exe" }
+foreach ($f in @($dll,$inj,$node,'C:\wb.js')) { if (-not (Test-Path $f)) { throw "missing $f (run install first)" } }
 
 $running = Get-Process QQ -ErrorAction SilentlyContinue
 if ($running) {
-  if ($NoKill) { throw "QQ is running (pid $($running.Id -join ',')). Close it first, or drop -NoKill." }
-  Write-Host "stopping QQ (pid $($running.Id -join ','))..."
+  if ($NoKill) {
+    throw "QQ is running (pid $($running.Id -join ',')) but the engine is not up. Recovering the engine needs one QQ restart - drop -NoKill, or close QQ yourself and run again."
+  }
+  Write-Host "engine is not up, restarting QQ once (pid $($running.Id -join ','))..."
   $running | Stop-Process -Force
   Start-Sleep -Seconds 4
 }
@@ -69,19 +105,11 @@ Write-Host "waiting for engine 127.0.0.1:$port ..."
 $ok = $false
 for ($i = 0; $i -lt $WaitSeconds; $i++) {
   Start-Sleep -Seconds 1
-  try { $r = Invoke-RestMethod -Uri "http://127.0.0.1:$port/health" -TimeoutSec 3; if ($r.ok) { $ok = $true; break } } catch {}
+  if (Test-Engine -P $port) { $ok = $true; break }
 }
 if (-not $ok) { Write-Host "WARN engine did not answer in $WaitSeconds s; check $Root\js\boot.log and engine.log" -ForegroundColor Yellow; return }
 
-# bridge
-$bridgeDir = Join-Path $Root 'bridge'
-$br = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match 'bridge\.js' })
-if ($br.Count -eq 0) {
-  Start-Process -FilePath $node -ArgumentList 'src/bridge.js' -WorkingDirectory $bridgeDir -WindowStyle Hidden
-  Write-Host "bridge started"
-} else {
-  Write-Host "bridge already running (pid $($br[0].ProcessId))"
-}
+Start-Bridge
 Start-Sleep -Seconds 4
 Write-Host ""
 Write-Host "ready: engine http://127.0.0.1:$port | console http://127.0.0.1:3100/" -ForegroundColor Green
