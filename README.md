@@ -1,6 +1,10 @@
 # WhaleBridge
 
-**Let a real QQ client run your bot — by borrowing its own session, not by re-implementing the protocol.**
+**A brand-new way to connect a QQ bot.**
+
+> Instead of re-implementing the QQ protocol, WhaleBridge injects into the *real* QQ client
+> and borrows the session it already has. OneBot v11 in, real client packets out.
+
 
 [English](README.md) | [中文](README.zh.md)
 
